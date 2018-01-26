@@ -11,7 +11,7 @@ from sklearn.utils import shuffle
 import toolz.curried as tz
 import argparse
 
-NUM_EPOCHS = 250
+DEFAULT_EPOCHS = 250
 BATCH_SIZE = 64
 
 # Gotta have some output
@@ -63,9 +63,6 @@ def run(mode, modelname, forcenew, epochs):
     [scaler.fit(data[:,1:]) for data,scaler in zip(true_x,x_scalers)]
     [scaler.fit(data[:,:,1:].reshape((-1,5))) for data,scaler in zip(true_y,y_scalers)]
 
-    true_x = shuffle(true_x, random_state=4523)
-    true_y = shuffle(true_y, random_state=4523)
-
     if forcenew or not UpscalerModel.exists(modelname):
         upscaler_model = UpscalerModel.create_model(5)
     else:
@@ -73,7 +70,14 @@ def run(mode, modelname, forcenew, epochs):
 
 
     for epoch in range(epochs):
+        # Shuffle data every epoch to make sure batches are not always the same
+        randstate = np.random.random_integers(0,10000)
+        true_x = shuffle(*true_x, random_state=randstate)
+        true_y = [shuffle(true_y[0], random_state=randstate)]
+
         print("Starting epoch: {}".format(epoch))
+        critic_generator_advantage = 1.0
+        real_fake_advantage = 1.0
         TOTAL_NUM_BATCHES = int((len(true_x[0])+(BATCH_SIZE-1)) / BATCH_SIZE)
         for batch_idx in range(TOTAL_NUM_BATCHES):
             # Pick out the batch
@@ -84,8 +88,10 @@ def run(mode, modelname, forcenew, epochs):
             y = [scaler.transform(ty.reshape((-1,5))).reshape(ty.shape) for scaler,ty in zip(y_scalers,y)]
 
             # Generate "fake" data
-            priors = np.random.uniform(size=len(x))
-            generated_y = upscaler_model.generate_output(x, priors)
+            noise_mod = (1.0 - epoch/epochs)
+            noised = lambda a: np.random.normal(scale=noise_mod, size=a.shape)+a
+            x = [noised(k) for k in x]
+            generated_y = upscaler_model.generate_output(x)
             assert len(generated_y) == 3, "Expected exactly 3 output vector. Got {}".format(len(generated_y))
         
             # Train the critic
@@ -93,15 +99,19 @@ def run(mode, modelname, forcenew, epochs):
             real_samples = [np.array(k) for k in real_samples]
         
             fake_samples = generated_y
-            critic_eval_result = upscaler_model.train_critic( real_samples, fake_samples )
+            critic_eval_result = upscaler_model.train_critic( real_samples, fake_samples, 1.0 / critic_generator_advantage, real_fake_advantage )
             
             # Train the generator (adverserial)
-            generator_eval_result = upscaler_model.train_generator(x, priors)
+            generator_eval_result = upscaler_model.train_generator(x, critic_generator_advantage)
             
             # Print the current results
             print("Epoch: {}, BatchIdx={}/{} results:".format(epoch,batch_idx+1,TOTAL_NUM_BATCHES))
             print("\t Critic: {}".format(critic_eval_result))
             print("\t Generator: {}".format(generator_eval_result))
+
+            critic_generator_advantage = generator_eval_result[0] / critic_eval_result[1][0]
+            real_fake_advantage = critic_eval_result[1][1] / critic_eval_result[0][1]
+
 
         if epoch % 10 == 0:
             # Save the last generated sample
@@ -125,7 +135,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--mode', default="both", action="store", help="Execution mode: 'train', 'generate'")
     parser.add_argument('-n', '--name', default="tmp", action="store", help="model name")
     parser.add_argument('-f', '--forcenew', action='store_true', help="Discard model if already exists")
-    parser.add_argument('-e', '--epochs', default=NUM_EPOCHS, type=int, action='store', help="Number of epochs")
+    parser.add_argument('-e', '--epochs', default=DEFAULT_EPOCHS, type=int, action='store', help="Number of epochs")
     args = parser.parse_args()
     assert args.mode in ["train", "eval","both"], "invalid mode"
 
