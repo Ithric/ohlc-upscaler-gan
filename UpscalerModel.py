@@ -1,4 +1,9 @@
 import numpy as np
+import dill as pickle
+from common import make_keras_picklable, unzip
+import os
+
+make_keras_picklable()
 
 class UpscalerModel(object):
     def __init__(self, actor, critic):
@@ -77,18 +82,24 @@ class UpscalerModel(object):
         return UpscalerModel(actor=create_actor(), critic=create_critic())
 
     def load_model(model_name):
-        with open("{}.gan.pickle".format(model_name), mode="wb") as fd:
+        with open("{}.gan.pickle".format(model_name), mode="rb") as fd:
             memento = pickle.load(fd)
             return UpscalerModel(memento["generator"], memento["critic"])
 
-    def save_model(self, model_name):
+    def exists(model_name):
+        return os.path.isfile("{}.gan.pickle".format(model_name))
+
+    def save_model(self, model_name):        
         memento = {
             "generator" : self.__generator,
             "critic" : self.__critic,
             "metadata" : "test"
         }
-        with open("{}.gan.pickle".format(model_name), mode="rb") as fd:
+        fpath = "{}.gan.pickle".format(model_name)
+        with open(fpath, mode="wb") as fd:
             pickle.dump(memento, fd)
+        return fpath
+        
 
     def generate_output(self, x, priors):      
         assert len(x) == 3, "len(x) is {}. Should be 3".format(len(x))  
@@ -106,6 +117,6 @@ class UpscalerModel(object):
         return (loss_a, loss_b)
 
     def train_generator(self, x, priors):        
-        # Train the generator to maximize the probability of being misclassified as "real" through the adverserial optimizer
+        # Train the generator to maximize the probability of being misclassified as "real" through the adverserial optimizer        
         loss = self.__adverserial_trainer.train_on_batch(x, np.ones((len(x[0]),1)) )
         return loss

@@ -1,3 +1,5 @@
+import tempfile
+import os
 
 def unzip(z): return zip(*z)
 
@@ -24,15 +26,3 @@ def make_keras_picklable():
     cls = keras.models.Model
     cls.__getstate__ = __getstate__
     cls.__setstate__ = __setstate__
-
-
-# from collections import deque
-
-# def window(seq, n=2):
-#     it = iter(seq)
-#     win = deque((next(it, None) for _ in range(n)), maxlen=n)
-#     yield win
-#     append = win.append
-#     for e in it:
-#         append(e)
-#         yield win
