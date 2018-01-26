@@ -1,4 +1,6 @@
 
+def unzip(z): return zip(*z)
+
 def make_keras_picklable():
     import keras.models
     def __getstate__(self):

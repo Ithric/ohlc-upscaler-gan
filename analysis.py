@@ -17,7 +17,8 @@ def resample_ohlc(dfquotes, period):
 
     return dfquotes.resample(period, how=ohlc_dict, closed='left', label='left')
 
-def plot_ohlc(dfquotes):
+def __plot_ohlc(dfquotes):
+    dfquotes = dfquotes.set_index(dfquotes["date"])
     quotes = []
     for t,q in zip(date2num(dfquotes.index.to_pydatetime()), dfquotes[["open","high","low","close"]].values.tolist()):
         quotes.append([t]+q)
@@ -27,18 +28,26 @@ def plot_ohlc(dfquotes):
     weekFormatter = DateFormatter('%b %d')  # e.g., Jan 12
     dayFormatter = DateFormatter('%d')      # e.g., 12
 
-    fig, ax = plt.subplots()
-    # fig.subplots_adjust(bottom=0.2)
-    # ax.xaxis.set_major_locator(mondays)
-    # ax.xaxis.set_minor_locator(alldays)
-    # ax.xaxis.set_major_formatter(weekFormatter)
-    #ax.xaxis.set_minor_formatter(weekFormatter)
-
-    #plot_day_summary(ax, quotes, ticksize=3)
-    candlestick_ohlc(ax, quotes)
-
-    ax.xaxis_date()
-    ax.autoscale_view()
+    # Set up a 5x1 grid, mapped to a visual 2x1 grid
+    fig = plt.figure()
+    ax1 = plt.subplot2grid( (5,1), (0,0), rowspan=4 )
+    ax2 = plt.subplot2grid( (5,1), (4,0), rowspan=1 )
+    
+    # Render the ohlc plot
+    candlestick_ohlc(ax1, quotes)
+    ax1.xaxis_date()
+    ax1.autoscale_view()
     plt.setp(plt.gca().get_xticklabels(), rotation=45, horizontalalignment='right')
 
+    # Render the volume plot
+    vols = dfquotes["volume"].values
+    dates = dfquotes["date"].values
+    ax2.bar(dates,vols)
+
+def plot_ohlc_tofile(dfquotes, filename):
+    __plot_ohlc(dfquotes)
+    plt.savefig(filename)
+
+def plot_ohlc(dfquotes):
+    __plot_ohlc(dfquotes)
     plt.show()
