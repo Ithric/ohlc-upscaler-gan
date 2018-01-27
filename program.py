@@ -26,7 +26,7 @@ else:
 def get_samples():
     """ Return samples on the format [(source:left,middle,right),..], [target] """
     col_order = ["date","open","high","low","close","volume"]
-    df = pd.read_csv("gspc.csv", parse_dates=["Date"])
+    df = pd.read_csv("data/gspc.csv", parse_dates=["Date"])
     df = df.rename(columns={"Date":"date", "Open" : "open", "High" : "high", "Low" : "low", "Close" : "close", "Adj Close" : "adjclose", "Volume" : "volume"})
     df = df.set_index(df["date"])
     #df = df.ix[datetime(2017,3,1):]
