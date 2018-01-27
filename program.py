@@ -34,27 +34,36 @@ def get_samples():
     df_target = df
     
     def to_sample(source_rows):
-        left, middle, right = source_rows
-        target_rows = df_target.ix[middle[0]+timedelta(days=7):middle[0]+timedelta(days=2*7,microseconds=-1)][col_order].values        
-        return [left,middle,right], target_rows
+        source_rows = np.array(source_rows)
+        v200davg = np.average(source_rows[:,3].astype(float))
+        left, middle, right = source_rows[-3:]
+        target_rows = df_target.ix[middle[0]+timedelta(days=7):middle[0]+timedelta(days=2*7,microseconds=-1)][col_order].values   
+
+        # Transform
+        left[1:] = left[1:] / v200davg
+        middle[1:] = middle[1:] / v200davg
+        right[1:] = right[1:] / v200davg
+        target_rows = np.concatenate([target_rows[:,:1], target_rows[:,1:]/v200davg], axis=1)
+
+        return v200davg, [left,middle,right], target_rows
 
     def filter_valid(sample):
-        _,target_rows = sample
+        _,_,target_rows = sample
         return len(target_rows) == 5
 
-    x, y = tz.pipe(
-        tz.sliding_window(3, df_source[col_order].values),
+    trend, x, y = tz.pipe(
+        tz.sliding_window(28, df_source[col_order].values),
         tz.map(to_sample),
         tz.filter(filter_valid),
         unzip
     )
 
-    return x,y
+    return trend, x,y
 
 
 def run(mode, modelname, forcenew, epochs):
     # Get the same data in source and target resolution
-    true_x, true_y = get_samples() 
+    trendline, true_x, true_y = get_samples() 
     true_x = [np.array(x) for x in zip(*true_x)]
     true_y = [np.array(true_y)]
 
@@ -117,9 +126,11 @@ def run(mode, modelname, forcenew, epochs):
             # Save the last generated sample
             ohlc_dates = true_y[0][batch_idx*BATCH_SIZE:(batch_idx+1)*BATCH_SIZE]
             ohlc_dates = ohlc_dates[0].reshape((-1,6))[:,:1]    
+            trend_factor = trendline[batch_idx*BATCH_SIZE]
 
             ohlc = generated_y[1][-1]
             ohlc = y_scalers[0].inverse_transform(ohlc.reshape((-1,5))).reshape(ohlc.shape)
+            ohlc = ohlc * trend_factor
             ohlc = np.concatenate([ohlc_dates,ohlc],axis=1)
             last_ohlc_df = pd.DataFrame(ohlc, columns=["date","open","high","low","close","volume"])
             analysis.plot_ohlc_tofile(last_ohlc_df, "./output/e{}.png".format(epoch))
