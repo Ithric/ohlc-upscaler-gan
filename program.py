@@ -59,7 +59,7 @@ def get_samples():
 
     def filter_valid(sample):
         _,_,target_rows = sample
-        return len(target_rows) == 5
+        return len(target_rows) == 5 and not pd.isnull(target_rows).any()
 
     trend, x, y = tz.pipe(
         tz.sliding_window(28, df_source[col_order].values),
@@ -152,7 +152,7 @@ def run(mode, modelname, forcenew, epochs):
         if(modelname != "tmp"):
             print("Model saved as: {}".format(upscaler_model.save_model(modelname)))
 
-    if allow_generate: # HACKETY HACK - TODO: this mus be fixed..
+    if allow_generate:
         # Generate a complete upscaled OHLC series over the entire dataset (true_x)
 
         # Kick the 'date' from the data, and scale it
