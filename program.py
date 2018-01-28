@@ -154,36 +154,34 @@ def run(mode, modelname, forcenew, epochs):
 
     if allow_generate:
         # Generate a complete upscaled OHLC series over the entire dataset (true_x)
+        x = [scaler.transform(tx[:,1:]) for scaler,tx in zip(x_scalers,true_x)]
+        ohlc = upscaler_model.generate_output(x)[1].reshape((-1,5))
 
-        # Kick the 'date' from the data, and scale it
-        x = [tx[:,1:] for tx in true_x] 
-        #y = [ty[:,:,1:] for ty in true_y]
-
-        x = [scaler.transform(tx) for scaler,tx in zip(x_scalers,x)]
-        #y = [scaler.transform(ty.reshape((-1,5))).reshape(ty.shape) for scaler,ty in zip(y_scalers,y)]
-
-        upscaled_ohlc = upscaler_model.generate_output(x)[1].reshape((-1,5))
+        # Get the dates which correspond to the generated output
         ohlc_dates = true_y[0].reshape((-1,6))[:,:1]   
     
-        ohlc = y_scalers[0].inverse_transform(upscaled_ohlc)
+        # Transform the upscaled output by inverse scaling and re-applying the trend
+        ohlc = y_scalers[0].inverse_transform(ohlc)
         trendline = np.repeat(np.array(trendline),5).reshape((-1,1))
         ohlc = ohlc * trendline
         ohlc = np.concatenate([ohlc_dates,ohlc],axis=1)
+
+        # Build a dataframe from the ohlc data and resample to 1w resolution for comparison with the original
         last_ohlc_df = pd.DataFrame(ohlc, columns=["date","open","high","low","close","volume"])
         last_ohlc_df = last_ohlc_df.set_index(last_ohlc_df["date"])
-        last_ohlc_df.sort_index(inplace=True)
+        last_ohlc_df.sort_index(inplace=True) 
         last_ohlc_df = last_ohlc_df.ix[datetime(2017,1,1):datetime(2018,1,1)]
         last_ohlc_df = analysis.resample_ohlc(last_ohlc_df, "1w").dropna(how='any')
-        print(last_ohlc_df)
-        #analysis.plot_ohlc_tofile(last_ohlc_df, "./output/{}_upscaled.png".format(modelname))
+        analysis.plot_ohlc_tofile(last_ohlc_df, "./output/{}_1w.png".format(modelname))
         analysis.plot_ohlc(last_ohlc_df)
 
+        # Plot the original data in a week resolution
         df = pd.read_csv("data/gspc.csv", parse_dates=["Date"])
         df = df.rename(columns={"Date":"date", "Open" : "open", "High" : "high", "Low" : "low", "Close" : "close", "Adj Close" : "adjclose", "Volume" : "volume"})
         df = df.set_index(df["date"])
-        #df = df.ix[datetime(2017,3,1):]
         df = df.ix[datetime(2017,1,1):datetime(2018,1,1)]
         df = analysis.resample_ohlc(df, "1w")
+        analysis.plot_ohlc_tofile(df, "./output/{}_1w_original.png".format(modelname))
         analysis.plot_ohlc(df)
 
 
