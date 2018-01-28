@@ -47,6 +47,8 @@ def __plot_ohlc(dfquotes):
 def plot_ohlc_tofile(dfquotes, filename):
     __plot_ohlc(dfquotes)
     plt.savefig(filename)
+    plt.clf()
+    plt.close()
 
 def plot_ohlc(dfquotes):
     __plot_ohlc(dfquotes)

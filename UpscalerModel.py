@@ -112,7 +112,6 @@ class UpscalerModel(object):
 
     def train_critic(self, real_samples_x, fake_samples_x, generator_critic_advantage, real_fake_advantage):
         epochs = 1 if generator_critic_advantage <= BOOSTING_HYSTERESIS_RATIO else 2
-        print("generator_critic_advantage=>", generator_critic_advantage)
 
         for _ in range(epochs):
             # Train the critic to classify real samples
@@ -128,7 +127,6 @@ class UpscalerModel(object):
         return (loss_a, loss_b)
 
     def train_generator(self, x, critic_generator_advantage):
-        print("critic_gen_adv=>", critic_generator_advantage)
         # Train the generator to maximize the probability of being misclassified as "real" through the adverserial optimizer        
         epochs = 1 if critic_generator_advantage <= BOOSTING_HYSTERESIS_RATIO else 2
         for _ in range(epochs):
