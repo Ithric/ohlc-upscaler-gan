@@ -122,10 +122,12 @@ class UpscalerModel(object):
         for _ in range(epochs):
             # Train the critic to classify real samples
             real_samples_y = np.ones((real_samples_x[0].shape[0],1))
+            real_samples_y = real_samples_y + np.random.normal(size=real_samples_y.shape, scale=0.1)
             loss_a = self.__critic_trainer.train_on_batch(real_samples_x, real_samples_y)
 
             # Train the critic to classify the "fake" samples
             fake_samples_y = np.zeros((fake_samples_x[0].shape[0],1))
+            fake_samples_y = fake_samples_y + np.random.normal(size=fake_samples_y.shape, scale=0.1)
             loss_b = self.__critic_trainer.train_on_batch(fake_samples_x, fake_samples_y)
        
         return (loss_a, loss_b)

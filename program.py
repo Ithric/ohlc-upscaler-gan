@@ -174,7 +174,7 @@ def run(mode, modelname, forcenew, epochs):
             print("Model saved as: {}".format(upscaler_model.save_model(modelname)))
 
     if allow_generate:
-        NUM_CANDIATES = 15
+        NUM_CANDIATES = 25
         # Generate a complete upscaled OHLC series over the entire dataset (true_x)
         x = [scaler.transform(tx[:,1:]) for scaler,tx in zip(x_scalers,true_x)]
         x = [np.repeat(tx, NUM_CANDIATES, axis=0) for tx in x]
