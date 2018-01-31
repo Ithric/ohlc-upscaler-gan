@@ -4,6 +4,7 @@ from matplotlib.dates import DateFormatter, WeekdayLocator,\
     DayLocator, MONDAY
 from matplotlib.finance import quotes_historical_yahoo_ohlc, candlestick_ohlc
 from matplotlib.dates import date2num
+import toolz.curried as tz
 
 def resample_ohlc(dfquotes, period):
     ohlc_dict = {                                                                                                             
@@ -53,3 +54,20 @@ def plot_ohlc_tofile(dfquotes, filename):
 def plot_ohlc(dfquotes):
     __plot_ohlc(dfquotes)
     plt.show()
+
+def is_valid_ohlc(ohlc_row):
+    """ ohlc format: (open,high,low,close,volume) """
+    _open, _high, _low, _close, _volume = ohlc_row
+    isin_bunds = lambda v: v >= _low and v <= _high
+    return _high >= _low and isin_bunds(_open) and isin_bunds(_close) and _volume >= 0
+
+def group_valid(ohlc):
+    groups = tz.groupby(is_valid_ohlc, ohlc)
+    valid_ohlc = groups[True]
+    invalid_ohlc = groups[False]
+    return valid_ohlc, invalid_ohlc
+
+def calculate_ohlc_stats(ohlc):
+    valid_ohlc, invalid_ohlc = group_valid(ohlc)
+    return len(valid_ohlc), len(invalid_ohlc), len(valid_ohlc) / len(ohlc)
+    

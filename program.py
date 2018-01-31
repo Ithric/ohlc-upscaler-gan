@@ -5,7 +5,7 @@ import os
 from common import unzip
 from UpscalerModel import UpscalerModel
 from datetime import datetime, timedelta
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import RobustScaler, StandardScaler
 from sklearn.utils import shuffle
 #import toolz as tz
 import toolz.curried as tz
@@ -80,10 +80,17 @@ def run(mode, modelname, forcenew, epochs):
     true_x = [np.array(x) for x in zip(*true_x)]
     true_y = [np.array(true_y)]
 
-    x_scalers = [RobustScaler() for x in true_x]
-    y_scalers = [RobustScaler() for y in true_y]
+    # Fit scalers
+    x_scalers = [StandardScaler() for x in true_x]
+    y_scalers = [StandardScaler() for y in true_y]
     [scaler.fit(data[:,1:]) for data,scaler in zip(true_x,x_scalers)]
     [scaler.fit(data[:,:,1:].reshape((-1,5))) for data,scaler in zip(true_y,y_scalers)]
+
+    def restore_ohlc(ohlc_dates, ohlc, ohlc_trend ):
+        ohlc = y_scalers[0].inverse_transform(ohlc)
+        ohlc = ohlc * np.repeat(np.array(ohlc_trend),5).reshape((-1,1))
+        ohlc = np.concatenate([ohlc_dates.reshape(-1,1),ohlc],axis=1)
+        return ohlc
 
     # Shuffle data
     randstate = np.random.random_integers(0,10000)
@@ -91,6 +98,7 @@ def run(mode, modelname, forcenew, epochs):
     true_x = shuffle(*true_x, random_state=randstate)
     true_y = [shuffle(true_y[0], random_state=randstate)]
 
+    # Load or create the model
     if forcenew or not UpscalerModel.exists(modelname):
         upscaler_model = UpscalerModel.create_model(5)
     else:
@@ -100,18 +108,21 @@ def run(mode, modelname, forcenew, epochs):
         for epoch in range(epochs):
             print("Starting epoch: {}".format(epoch))
             critic_generator_advantage = 1.0
-            real_fake_advantage = 1.0
             TOTAL_NUM_BATCHES = int((len(true_x[0])+(BATCH_SIZE-1)) / BATCH_SIZE)
             for batch_idx in range(TOTAL_NUM_BATCHES):
-                # Pick out the batch
-                x = [tx[batch_idx*BATCH_SIZE:(batch_idx+1)*BATCH_SIZE][:,1:] for tx in true_x] 
-                y = [ty[batch_idx*BATCH_SIZE:(batch_idx+1)*BATCH_SIZE][:,:,1:] for ty in true_y]
+                # Pick out the batch and split into metadat/data
+                x = [tx[batch_idx*BATCH_SIZE:(batch_idx+1)*BATCH_SIZE] for tx in true_x] 
+                y = [ty[batch_idx*BATCH_SIZE:(batch_idx+1)*BATCH_SIZE] for ty in true_y]
+                tl = trendline[batch_idx*BATCH_SIZE:(batch_idx+1)*BATCH_SIZE]
+                x_meta, x = zip(*[(tx[:,:1], tx[:,1:]) for tx in x])
+                y_meta, y = zip(*[(ty[:,:,:1], ty[:,:,1:]) for ty in y])
 
+                # Normalize the data
                 x = [scaler.transform(tx) for scaler,tx in zip(x_scalers,x)]
                 y = [scaler.transform(ty.reshape((-1,5))).reshape(ty.shape) for scaler,ty in zip(y_scalers,y)]
 
                 # Generate "fake" data
-                noise_mod = (1.0 - epoch/epochs)
+                noise_mod = (1.0 - epoch/epochs) * 0.2
                 noised = lambda a: np.random.normal(scale=noise_mod, size=a.shape)+a
                 x = [noised(k) for k in x]
                 generated_y = upscaler_model.generate_output(x)
@@ -122,7 +133,7 @@ def run(mode, modelname, forcenew, epochs):
                 real_samples = [np.array(k) for k in real_samples]
             
                 fake_samples = generated_y
-                critic_eval_result = upscaler_model.train_critic( real_samples, fake_samples, 1.0 / critic_generator_advantage, real_fake_advantage )
+                critic_eval_result = upscaler_model.train_critic( real_samples, fake_samples, 1.0 / critic_generator_advantage )
                 
                 # Train the generator (adverserial)
                 generator_eval_result = upscaler_model.train_generator(x, critic_generator_advantage)
@@ -131,9 +142,19 @@ def run(mode, modelname, forcenew, epochs):
                 print("Epoch: {}, BatchIdx={}/{} results:".format(epoch,batch_idx+1,TOTAL_NUM_BATCHES))
                 print("\t Critic: {}".format(critic_eval_result))
                 print("\t Generator: {}".format(generator_eval_result))
+                ohlc = restore_ohlc( y_meta[0], generated_y[1].reshape((-1,5)), tl )[:,1:]
+                print("\t Valid/Invalid: {} vs {} => {:.2%}%".format(*analysis.calculate_ohlc_stats(ohlc)))
 
-                critic_generator_advantage = generator_eval_result[0] / critic_eval_result[1][0]
-                real_fake_advantage = critic_eval_result[1][1] / critic_eval_result[0][1]
+                # Apply another level of training to the critic to deter invalid OHLC
+                ohlc_validvec = tz.pipe(ohlc, tz.map(analysis.is_valid_ohlc), list)            
+                invalid_ohlc_samples_x = tz.pipe(zip(*generated_y+[ohlc_validvec]),
+                    tz.filter(lambda t: t[-1] == False ),
+                    tz.map(lambda t: t[:-1]),
+                    unzip, tz.map(np.array), list)
+                inv_loss = upscaler_model.train_critic_invalid(invalid_ohlc_samples_x)                
+                print("\t Invalid loss: {} ({}# samples)".format(inv_loss, len(invalid_ohlc_samples_x[0])))
+
+                critic_generator_advantage = critic_eval_result[1][1] #generator_eval_result[0] / critic_eval_result[1][0]
 
 
             if epoch % 10 == 0:
@@ -153,18 +174,41 @@ def run(mode, modelname, forcenew, epochs):
             print("Model saved as: {}".format(upscaler_model.save_model(modelname)))
 
     if allow_generate:
+        NUM_CANDIATES = 15
         # Generate a complete upscaled OHLC series over the entire dataset (true_x)
         x = [scaler.transform(tx[:,1:]) for scaler,tx in zip(x_scalers,true_x)]
+        x = [np.repeat(tx, NUM_CANDIATES, axis=0) for tx in x]
+        x = [tx+np.random.normal(size=tx.shape, scale=0.05) for tx in x]
         ohlc = upscaler_model.generate_output(x)[1].reshape((-1,5))
+        ohlc = y_scalers[0].inverse_transform(ohlc)
 
-        # Get the dates which correspond to the generated output
-        ohlc_dates = true_y[0].reshape((-1,6))[:,:1]   
+        def best_of_group(ohlc_group):
+            """ Select 1 OHLC row per candiate which is valid """
+            valid_ohlc_rows = tz.pipe(ohlc_group,
+                tz.filter(lambda p: p[0]),
+                list)
+            if any(valid_ohlc_rows): return valid_ohlc_rows[0][1]
+            else: return ohlc_group[0][1]
+
+        # OHLC contains NUM_CANDIATES per day - rebuild the series by picking only 1 valid candidate per day
+        ohlc = tz.pipe(ohlc,
+            tz.map(lambda ohlc_row: (analysis.is_valid_ohlc(ohlc_row), ohlc_row)),
+            tz.partition(NUM_CANDIATES),
+            tz.map(best_of_group),
+            list,
+            np.array
+        )
     
         # Transform the upscaled output by inverse scaling and re-applying the trend
-        ohlc = y_scalers[0].inverse_transform(ohlc)
         trendline = np.repeat(np.array(trendline),5).reshape((-1,1))
         ohlc = ohlc * trendline
+
+        # Get the dates which correspond to the generated output
+        ohlc_dates = true_y[0].reshape((-1,6))[:,:1]
         ohlc = np.concatenate([ohlc_dates,ohlc],axis=1)
+
+        # high[2], low[3]
+        print("Valid/Invalid: {} / {} => {:.2%}%".format(*analysis.calculate_ohlc_stats(ohlc[:,1:])))
 
         # Build a dataframe from the ohlc data and resample to 1w resolution for comparison with the original
         last_ohlc_df = pd.DataFrame(ohlc, columns=["date","open","high","low","close","volume"])

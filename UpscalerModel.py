@@ -2,6 +2,8 @@ import numpy as np
 import dill as pickle
 from common import make_keras_picklable, unzip
 import os
+import analysis
+import toolz.curried as tz
 
 make_keras_picklable()
 
@@ -56,6 +58,7 @@ class UpscalerModel(object):
 
             # Upscale the middle
             middle = Dense(4*upscaling_factor*5, activation="linear")(ohlc_middle_input)
+            middle = LeakyReLU(alpha=0.3)(middle)
             middle = Dense(3*upscaling_factor*5, activation="linear")(middle)
             middle = LeakyReLU(alpha=0.3)(middle)
             middle = Dense(2*upscaling_factor*5, activation="linear")(middle)
@@ -76,6 +79,9 @@ class UpscalerModel(object):
             ohlc_middle = Flatten()(ohlc_middle_input)
             y = concatenate([ohlc_left_input, ohlc_middle, ohlc_right_input])
             y = Dense(128, activation="linear")(y)
+            y = LeakyReLU()(y)
+            y = Dense(64, activation="linear")(y)
+            y = LeakyReLU()(y)
             y = Dense(64, activation="linear")(y)
             y = LeakyReLU()(y)
             y = Dense(64, activation="linear")(y)
@@ -110,25 +116,30 @@ class UpscalerModel(object):
         assert len(x) == 3, "len(x) is {}. Should be 3".format(len(x))  
         return self.__generator.predict(x)
 
-    def train_critic(self, real_samples_x, fake_samples_x, generator_critic_advantage, real_fake_advantage):
-        epochs = 1 if generator_critic_advantage <= BOOSTING_HYSTERESIS_RATIO else 2
+    def train_critic(self, real_samples_x, fake_samples_x, generator_critic_advantage):
+        epochs = 2 if generator_critic_advantage >= 0.6 else 1
 
         for _ in range(epochs):
             # Train the critic to classify real samples
-            for __ in range(2 if (1/real_fake_advantage) <= BOOSTING_HYSTERESIS_RATIO else 1):
-                real_samples_y = np.ones((real_samples_x[0].shape[0],1))
-                loss_a = self.__critic_trainer.train_on_batch(real_samples_x, real_samples_y)
+            real_samples_y = np.ones((real_samples_x[0].shape[0],1))
+            loss_a = self.__critic_trainer.train_on_batch(real_samples_x, real_samples_y)
 
             # Train the critic to classify the "fake" samples
-            for __ in range(2 if real_fake_advantage >= BOOSTING_HYSTERESIS_RATIO else 1):
-                fake_samples_y = np.zeros((fake_samples_x[0].shape[0],1))
-                loss_b = self.__critic_trainer.train_on_batch(fake_samples_x, fake_samples_y)
-
+            fake_samples_y = np.zeros((fake_samples_x[0].shape[0],1))
+            loss_b = self.__critic_trainer.train_on_batch(fake_samples_x, fake_samples_y)
+       
         return (loss_a, loss_b)
 
+    def train_critic_invalid(self, invalid_samples_x):
+        # Train the critic to classify the invalid samples
+        invalid_samples_y = np.zeros((invalid_samples_x[0].shape[0],1))
+        for _ in range(6):
+            loss = self.__critic_trainer.train_on_batch(invalid_samples_x, invalid_samples_y)
+        return loss
+
     def train_generator(self, x, critic_generator_advantage):
-        # Train the generator to maximize the probability of being misclassified as "real" through the adverserial optimizer        
-        epochs = 1 if critic_generator_advantage <= BOOSTING_HYSTERESIS_RATIO else 2
+        # Train the generator to maximize the probability of being misclassified as "real" through the adverserial optimizer     
+        epochs = 2 if critic_generator_advantage >= 0.6 else 1
         for _ in range(epochs):
             loss = self.__adverserial_trainer.train_on_batch(x, 0.9*np.ones((len(x[0]),1)) )
         return loss
