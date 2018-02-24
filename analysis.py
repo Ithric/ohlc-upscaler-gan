@@ -5,6 +5,10 @@ from matplotlib.dates import DateFormatter, WeekdayLocator,\
 from matplotlib.finance import quotes_historical_yahoo_ohlc, candlestick_ohlc
 from matplotlib.dates import date2num
 import toolz.curried as tz
+import numpy as np
+
+def ohlc_collapse(ohlc_rows):
+    return np.array([ohlc_rows[0][0], np.max(ohlc_rows[:,1]), np.min(ohlc_rows[:,2]), ohlc_rows[-1,3], np.sum(ohlc_rows[:,4])])
 
 def resample_ohlc(dfquotes, period):
     ohlc_dict = {                                                                                                             
@@ -63,8 +67,8 @@ def is_valid_ohlc(ohlc_row):
 
 def group_valid(ohlc):
     groups = tz.groupby(is_valid_ohlc, ohlc)
-    valid_ohlc = groups[True]
-    invalid_ohlc = groups[False]
+    valid_ohlc = groups[True] if True in groups else []
+    invalid_ohlc = groups[False] if False in groups else []
     return valid_ohlc, invalid_ohlc
 
 def calculate_ohlc_stats(ohlc):
